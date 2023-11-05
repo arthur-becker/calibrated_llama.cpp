@@ -41,6 +41,7 @@ models-mnt
 /convert-llama2c-to-ggml
 /embd-input-test
 /embedding
+/calibration
 /gguf
 /gguf-llama-simple
 /infill
