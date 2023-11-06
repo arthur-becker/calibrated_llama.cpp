@@ -91,19 +91,40 @@ static std::vector<float> softmax(const std::vector<float>& logits) {
     }
     return probs;
 }
+/*
+    Usage in process_logits(...):
 
+    const results_log_softmax results = log_softmax(n_vocab, logits + i*n_vocab, tokens[i+1]);
+
+    logits refers to the logit_i_1
+*/  
 static results_log_softmax log_softmax(int n_vocab, const float * logits, int tok) {
     float max_logit = logits[0];
-    for (int i = 1; i < n_vocab; ++i) {
+    for (int i = 1; i < n_vocab; ++i) { // 32000 iterations in Llama 2
         max_logit = std::max(max_logit, logits[i]);
     }
     double sum_exp = 0.0;
-    for (int i = 0; i < n_vocab; ++i) {
+    for (int i = 0; i < n_vocab; ++i) { // 32000 iterations in Llama 2
         sum_exp += expf(logits[i] - max_logit);
     }
     return {logits[tok] - max_logit - log(sum_exp), logits[tok], expf(logits[tok] - max_logit) / (float) sum_exp};
 }
 
+/*
+        Usage in perplexity(...):
+
+        const int first = n_ctx/2;
+        process_logits(
+            n_vocab, 
+            const float * logits =        logits.data() + first*n_vocab =      logits.data() + n_ctx/2, 
+            const int * tokens =       tokens.data() + start + first =      tokens.data() + i * n_ctx + n_ctx/2,
+            int n_token =        n_ctx - 1 - first =       n_ctx - 1 - n_ctx/2,
+            workers, 
+            nll, 
+            nll2, 
+            float * logit_history =          logit_history.data() + start + first, 
+            float * prob_history =          prob_history.data() + start + first);
+*/
 static void process_logits(
     int n_vocab, const float * logits, const int * tokens, int n_token, std::vector<std::thread> & workers,
     double & nll, double & nll2, float * logit_history, float * prob_history
@@ -275,6 +296,8 @@ static results_perplexity perplexity_v2(llama_context * ctx, const gpt_params & 
 }
 
 static results_perplexity perplexity(llama_context * ctx, const gpt_params & params) {
+    // print params.ppl_stride
+
     if (params.ppl_stride > 0) {
         return perplexity_v2(ctx, params);
     }
@@ -284,18 +307,21 @@ static results_perplexity perplexity(llama_context * ctx, const gpt_params & par
     // Output: `perplexity: 13.5106 [114/114]`
     // BOS tokens will be added for each chunk before eval
 
+    // Initialize
     const bool is_spm = llama_vocab_type(llama_get_model(ctx)) == LLAMA_VOCAB_TYPE_SPM;
     const bool add_bos = is_spm;
     const int n_ctx = llama_n_ctx(ctx);
 
+    // Tokenization
     auto tim1 = std::chrono::high_resolution_clock::now();
     fprintf(stderr, "%s: tokenizing the input ..\n", __func__);
-
+    
     std::vector<llama_token> tokens = ::llama_tokenize(ctx, params.prompt, add_bos);
 
     auto tim2 = std::chrono::high_resolution_clock::now();
     fprintf(stderr, "%s: tokenization took %g ms\n",__func__,1e-3*std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count());
 
+    // Check if there are enough tokens
     if (int(tokens.size()) < 2*n_ctx) {
         fprintf(stderr, "%s: you need at least %d tokens to evaluate perplexity with a context of %d\n",__func__,2*n_ctx,
                 n_ctx);
@@ -303,30 +329,37 @@ static results_perplexity perplexity(llama_context * ctx, const gpt_params & par
         return {std::move(tokens), 0., {}, {}};
     }
 
+    // Initialize history
     std::vector<float> logit_history;
     logit_history.resize(tokens.size());
 
     std::vector<float> prob_history;
     prob_history.resize(tokens.size());
 
+    // Initialize number of chunks, vocabulary size, and batch size
     const int n_chunk_max = tokens.size() / n_ctx;
 
     const int n_chunk = params.n_chunks < 0 ? n_chunk_max : std::min(params.n_chunks, n_chunk_max);
     const int n_vocab = llama_n_vocab(llama_get_model(ctx));
     const int n_batch = params.n_batch;
 
+    // Initialize count, negative log-likelihood, and negative log-likelihood squared
     int count = 0;
     double nll = 0.0;
     double nll2 = 0.0;
 
     fprintf(stderr, "%s: calculating perplexity over %d chunks, batch_size=%d\n", __func__, n_chunk, n_batch);
 
+    // Initialize workers
     std::vector<std::thread> workers(std::thread::hardware_concurrency() - 1);
 
+    // Go through each chunk. Each chunk is a context window (params.n_ctx) of tokens.
     for (int i = 0; i < n_chunk; ++i) {
+        // Get indices of start and end tokens of chunk
         const int start =     i * n_ctx;
         const int end   = start + n_ctx;
 
+        // Get number of batches in the chunk. Add n_batch - 1 to round up.
         const int num_batches = (n_ctx + n_batch - 1) / n_batch;
 
         std::vector<float> logits;
@@ -336,7 +369,11 @@ static results_perplexity perplexity(llama_context * ctx, const gpt_params & par
         // clear the KV cache
         llama_kv_cache_clear(ctx);
 
+        // Go through each batch of the chunk and calculate logits for each token in the batch
+        // Create a vector of all the logits in the context window
         for (int j = 0; j < num_batches; ++j) {
+
+            // Indices of start and end tokens of batch
             const int batch_start = start + j * n_batch;
             const int batch_size  = std::min(end - batch_start, n_batch);
 
@@ -348,6 +385,8 @@ static results_perplexity perplexity(llama_context * ctx, const gpt_params & par
                 tokens[batch_start] = llama_token_bos(llama_get_model(ctx));
             }
 
+            // TODO: what happens in llama_decode?
+            // TODO: what is the difference between `tokens.data() + batch_start` and `j * n_batch`?
             if (llama_decode(ctx, llama_batch_get_one(tokens.data() + batch_start, batch_size, j * n_batch, 0))) {
                 fprintf(stderr, "%s : failed to eval\n", __func__);
                 return {tokens, -1, logit_history, prob_history};
@@ -355,13 +394,29 @@ static results_perplexity perplexity(llama_context * ctx, const gpt_params & par
 
             // restore the original token in case it was set to BOS
             tokens[batch_start] = token_org;
+            
+            /*
+                Note: According to the comment, llama_get_logits depends on llama_eval, howewer, llama_eval is not called.
 
+                It seems that llama_decode calculates logits.
+            */
+           /*
+                Let logit_i_j be the logit of token j on position i (token[i]=j).
+                Then, logits has the form: 
+                [
+                    logit_1_1, ... , logit_1_{n_vocab}, 
+                    logit_2_1, ... , logit_2_{n_vocab},
+                     ... , 
+                    logit_{n_ctx}_1, ... , logit_{n_ctx}_{n_vocab}
+                ]
+            */
             const auto * batch_logits = llama_get_logits(ctx);
             logits.insert(logits.end(), batch_logits, batch_logits + batch_size * n_vocab);
         }
 
         const auto t_end = std::chrono::high_resolution_clock::now();
 
+        // Print time
         if (i == 0) {
             const float t_total = std::chrono::duration<float>(t_end - t_start).count();
             fprintf(stderr, "%s: %.2f seconds per pass - ETA ", __func__, t_total);
@@ -400,6 +455,17 @@ static results_perplexity perplexity(llama_context * ctx, const gpt_params & par
             printf("%8d  %.4lf  %4lf  %4lf\n", i*n_ctx, std::exp(nll / count), av, av2);
         }
         fflush(stdout);
+
+        // TODO: calculate probabilities instead of perplexity here
+        printf("\n\n\n Information about context window %d \n", i);
+
+        // print length of logits
+        printf("logits.size() = %zu\n", logits.size());
+        printf("tokens.size() = %zu\n", tokens.size());
+        printf("n_vocab = %d\n", n_vocab);
+
+        printf("\n\n\n");
+
     }
     printf("\n");
 
