@@ -9,6 +9,7 @@
 #include <thread>
 #include <mutex>
 #include <vector>
+#include <numeric>
 
 struct results_perplexity {
     std::vector<llama_token> tokens;
@@ -483,6 +484,160 @@ static results_perplexity perplexity(llama_context * ctx, const gpt_params & par
     return {tokens, ppl, logit_history, prob_history};
 }
 
+static std::vector<float> probabilities(llama_context * ctx, const gpt_params & params) {
+    // Initialize
+    const bool is_spm = llama_vocab_type(llama_get_model(ctx)) == LLAMA_VOCAB_TYPE_SPM;
+    const bool add_bos = is_spm;
+    const int n_ctx = llama_n_ctx(ctx);
+
+    // Tokenization
+    auto tim1 = std::chrono::high_resolution_clock::now();
+    fprintf(stderr, "%s: tokenizing the input ..\n", __func__);
+    
+    std::vector<llama_token> tokens = ::llama_tokenize(ctx, params.prompt, add_bos);
+
+    auto tim2 = std::chrono::high_resolution_clock::now();
+    fprintf(stderr, "%s: tokenization took %g ms\n",__func__,1e-3*std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count());
+
+    // Maximum `n_ctx` tokens are considered for inference
+    // That is why we need to restrict the number of tokens to `n_ctx`
+    // TODO: select maximum the last `n_ctx` tokens
+    if (int(tokens.size()) > n_ctx) {
+        tokens.erase(tokens.begin(), tokens.begin() + tokens.size() - n_ctx);
+    }
+    // Print number of tokens
+    printf("tokens.size() = %zu\n", tokens.size());
+
+    // Initialize number of chunks, vocabulary size, and batch size
+    const int n_vocab = llama_n_vocab(llama_get_model(ctx));
+    const int n_batch = params.n_batch;
+
+    fprintf(stderr, "%s: calculating probabilities for vocabulary of size %d, batch_size=%d\n", __func__, n_vocab, n_batch);
+
+    // Initialize workers
+    std::vector<std::thread> workers(std::thread::hardware_concurrency() - 1);
+
+    // Get indices of start and end tokens of chunk
+    const int start = 0;
+    const int end   = tokens.size();
+
+    // Get number of batches in the chunk. Add n_batch - 1 to round up.
+    const int num_batches = (n_ctx + n_batch - 1) / n_batch;
+
+    std::vector<float> logits;
+
+    const auto t_start = std::chrono::high_resolution_clock::now();
+
+    // clear the KV cache
+    llama_kv_cache_clear(ctx);
+
+    // Go through each batch of the chunk and calculate logits for each token in the batch
+    // Create a vector of all the logits in the context window
+    for (int j = 0; j < num_batches; ++j) {
+        // Indices of start and end tokens of batch
+        const int batch_start = start + j * n_batch;
+        const int batch_size  = std::min(end - batch_start, n_batch);
+
+        // save original token and restore it after eval
+        const auto token_org = tokens[batch_start];
+
+        // add BOS token for the first batch of each chunk
+        if (add_bos && j == 0) {
+            tokens[batch_start] = llama_token_bos(llama_get_model(ctx));
+        }
+
+        // TODO: what happens in llama_decode?
+        // TODO: what is the difference between `tokens.data() + batch_start` and `j * n_batch`?
+        if (llama_decode(ctx, llama_batch_get_one(tokens.data() + batch_start, batch_size, j * n_batch, 0))) {
+            fprintf(stderr, "%s : failed to eval\n", __func__);
+            return {};
+        }
+
+        // restore the original token in case it was set to BOS
+        tokens[batch_start] = token_org;
+           
+        /*
+            Note: According to the comment, llama_get_logits depends on llama_eval, howewer, llama_eval is not called.
+
+            It seems that llama_decode calculates logits.
+        */
+        /*
+            Let logit_i_j be the logit of token j on position i (token[i]=j).
+            Then, logits has the form: 
+            [
+                logit_1_1, ... , logit_1_{n_vocab}, 
+                logit_2_1, ... , logit_2_{n_vocab},
+                 ... , 
+                logit_{n_ctx}_1, ... , logit_{n_ctx}_{n_vocab}
+            ]
+        */
+        const auto * batch_logits = llama_get_logits(ctx);
+        logits.insert(logits.end(), batch_logits, batch_logits + batch_size * n_vocab);
+    }
+
+    const auto t_end = std::chrono::high_resolution_clock::now();
+
+    // Print time
+    // TODO: uncomment
+    /*if (i == 0) {
+        const float t_total = std::chrono::duration<float>(t_end - t_start).count();
+        fprintf(stderr, "%s: %.2f seconds per pass - ETA ", __func__, t_total);
+        int total_seconds = (int)(t_total * n_chunk);
+        if (total_seconds >= 60*60) {
+            fprintf(stderr, "%d hours ", total_seconds / (60*60));
+            total_seconds = total_seconds % (60*60);
+        }
+        fprintf(stderr, "%.2f minutes\n", total_seconds / 60.0);
+    }*/
+
+    // Print number of processed tokens and length of logits
+    printf("Logits for a sequence of length %zu have been calculated\n", tokens.size());
+    printf("tokens.size() = %zu\n", tokens.size());
+    printf("logits.size() = %zu\n", logits.size());
+
+    // Calculate probabilities of next token, given the previous ones.
+    std::__1::vector<float>::iterator start_logits = logits.begin() + (tokens.size() - 1) * n_vocab;
+    std::__1::vector<float>::iterator end_logits = logits.begin() + tokens.size() * n_vocab;
+
+    const std::vector<float> last_tok_logits(start_logits, end_logits);
+    printf("last_tok_logits.size() = %zu\n", last_tok_logits.size());
+
+    const std::__1::vector<float> probs = softmax(last_tok_logits);
+
+    /*  
+        n_ctx = 512
+        params.ppl_stride = 
+
+        for (int j = n_ctx - params.ppl_stride - 1; j < n_ctx - 1; ++j) {
+
+            // Calculate probability of next token, given the previous ones.
+            const std::vector<float> tok_logits(
+                logits.begin() + (j + 0) * n_vocab,
+                logits.begin() + (j + 1) * n_vocab);
+
+            
+    */
+
+    // Use unused variables to avoid warnings and not remove the code
+    (void) t_start;
+    (void) t_end;
+
+    return probs;
+}
+
+// Sorts the indices of a vector in descending order based on the values of the vector
+static std::vector<size_t> sort_indices(const std::vector<float>& v) {
+    // Initialize vector with indices
+    std::vector<size_t> indices(v.size());
+    std::iota(indices.begin(), indices.end(), 0);
+
+    // Sort indices based on values of v
+    std::sort(indices.begin(), indices.end(), [&v](size_t i, size_t j) { return v[i] > v[j]; });
+
+    return indices;
+}
+
+
 int main(int argc, char ** argv) {
     printf("\n--- Calibration Experiments ---\n\n");
 
@@ -546,11 +701,33 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "%s\n", get_system_info(params).c_str());
     }
 
-    struct results_perplexity results;
-    results = perplexity(ctx, params);
+    //struct results_perplexity results;
+    //results = perplexity(ctx, params);
+
+    static std::vector<float> probs = probabilities(ctx, params);
+    printf("probs.size() = %zu\n", probs.size());
+
+    // Get maximum probability
+    float max_prob = probs[0];
+    for (float v : probs) {
+        max_prob = std::max(max_prob, v);
+    }
+    printf("max_prob = %f\n", max_prob);
+
+    // Get indices of elements of probs sorded by value
+    std::vector<size_t> sorted_tokens = sort_indices(probs);
+
+    // Print 50 most probable tokens
+    printf("\n\n\n");
+    printf("50 most probable tokens:\n");
+    for (int i = 0; i < 50; i++) {
+        llama_token token = sorted_tokens[i];
+        std::string piece = llama_token_to_piece(ctx, token);
+        printf("piece = %s, prob = %f\n", piece.c_str(), probs[token]);
+    }
 
     llama_print_timings(ctx);
-    write_logfile(ctx, params, model, results);
+    //write_logfile(ctx, params, model, results);
 
     llama_free(ctx);
     llama_free_model(model);
