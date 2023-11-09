@@ -1,6 +1,6 @@
 # Define the default target now so that it is always the first target
 BUILD_TARGETS = \
-	main quantize quantize-stats perplexity embedding calibration vdot q8dot train-text-from-scratch convert-llama2c-to-ggml \
+	main quantize quantize-stats perplexity embedding calibration calibration-raw vdot q8dot train-text-from-scratch convert-llama2c-to-ggml \
 	simple batched batched-bench save-load-state server gguf llama-bench llava baby-llama beam-search  \
 	speculative infill benchmark-matmult parallel finetune export-lora tests/test-c.o
 
@@ -600,6 +600,9 @@ embedding: examples/embedding/embedding.cpp                   ggml.o llama.o $(C
 	$(CXX) $(CXXFLAGS) $(filter-out %.h,$^) -o $@ $(LDFLAGS)
 
 calibration: examples/calibration/calibration.cpp             ggml.o llama.o $(COMMON_DEPS) $(OBJS)
+	$(CXX) $(CXXFLAGS) $(filter-out %.h,$^) -o $@ $(LDFLAGS)
+
+calibration-raw: examples/calibration-raw/calibration-raw.cpp ggml.o llama.o $(COMMON_DEPS) $(OBJS)
 	$(CXX) $(CXXFLAGS) $(filter-out %.h,$^) -o $@ $(LDFLAGS)
 
 save-load-state: examples/save-load-state/save-load-state.cpp ggml.o llama.o $(COMMON_DEPS) $(OBJS)
