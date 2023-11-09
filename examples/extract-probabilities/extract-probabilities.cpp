@@ -280,8 +280,8 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
     }
 
     // Download: https://s3.amazonaws.com/research.metamind.io/wikitext/wikitext-2-raw-v1.zip?ref=salesforce-research
-    // Run `./perplexity -m models/7B/ggml-model-q4_0.bin -f wiki.test.raw`
-    // Output: `perplexity: 13.5106 [114/114]`
+    // Run `./calibration-raw -m models/7B/ggml-model-q4_0.bin -f wiki.test.raw`
+    // Output: `calibration-raw: 13.5106 [114/114]`
     // BOS tokens will be added for each chunk before eval
 
     const bool is_spm = llama_vocab_type(llama_get_model(ctx)) == LLAMA_VOCAB_TYPE_SPM;

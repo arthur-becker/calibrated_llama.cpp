@@ -42,6 +42,7 @@ models-mnt
 /embd-input-test
 /embedding
 /calibration
+/extract-probabilities
 /gguf
 /gguf-llama-simple
 /infill

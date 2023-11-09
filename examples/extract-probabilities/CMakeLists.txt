@@ -1,5 +1,5 @@
-set(TARGET calibration-raw)
-add_executable(${TARGET} calibration-raw.cpp)
+set(TARGET extract-probabilities)
+add_executable(${TARGET} extract-probabilities.cpp)
 install(TARGETS ${TARGET} RUNTIME)
 target_link_libraries(${TARGET} PRIVATE common llama ${CMAKE_THREAD_LIBS_INIT})
 target_compile_features(${TARGET} PRIVATE cxx_std_11)
