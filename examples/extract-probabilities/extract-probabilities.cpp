@@ -73,7 +73,11 @@ static void write_logfile(
     fclose(logfile);
 }
 
-static std::vector<float> softmax(const std::vector<float>& logits) {
+// Note: the probability values of softmax() and log_softmax() can be different in `perplexity.cpp`,
+// Because the sum of the exponential logits is casted to float in `log_softmax()`, but not in `softmax()`.
+//
+// To address this issue, the attribute `cast_to_float` was added to `softmax()` and `log_softmax()`
+static std::vector<float> softmax(const std::vector<float>& logits, bool cast_to_float = true) {
     std::vector<float> probs(logits.size());
     float max_logit = logits[0];
     for (float v : logits) {
@@ -88,7 +92,11 @@ static std::vector<float> softmax(const std::vector<float>& logits) {
         probs[i] = exp_logit;
     }
     for (size_t i = 0; i < probs.size(); i++) {
-        probs[i] /= sum_exp;
+        if(cast_to_float){
+            probs[i] /= (float) sum_exp;
+        } else {
+            probs[i] /= sum_exp;
+        }
     }
     return probs;
 }
@@ -255,7 +263,8 @@ static results_extraction extract_probabilities_v2(llama_context * ctx, const gp
                 logits.begin() + (j + 0) * n_vocab,
                 logits.begin() + (j + 1) * n_vocab);
 
-            const float prob = softmax(tok_logits)[tokens[start + j + 1]];
+            bool cast_to_float = false; // do not cast, because it is not casted in `perplexity.cpp`
+            const float prob = softmax(tok_logits, cast_to_float)[tokens[start + j + 1]];
             logit_history[start + j + 1] = tok_logits[tokens[start + j + 1]];
             prob_history[start + j + 1]  = prob;
 
