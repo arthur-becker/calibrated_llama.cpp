@@ -11,7 +11,6 @@
 #include <vector>
 
 static int top_k = 100;
-static const char * top_k_probs_path = "top_k_probs.bin";
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -559,10 +558,13 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
 }
 
 // Saves all values as a list of floats in binary format to the file with the given path
-static void save_probabilities(std::vector<float> top_k_probs_history, const char * path){
-    FILE * file = fopen(path, "wb");
+static void save_probabilities(std::vector<float> top_k_probs_history, std::string path){
+    char * path_char = new char[path.length() + 1];
+    strcpy(path_char, path.c_str());
+
+    FILE * file = fopen(path_char, "wb");
     if(file == NULL){
-        fprintf(stderr, "ERROR: cannot open file %s\n", path);
+        fprintf(stderr, "ERROR: cannot open file %s\n", path_char);
         exit(1);
     }
 
@@ -576,8 +578,40 @@ static void save_probabilities(std::vector<float> top_k_probs_history, const cha
     fclose(file);
 
     // Print a success message with the path to the file and number of floats
-    fprintf(stderr, "Saved %lu floats to %s\n", top_k_probs_history_size, path);
+    fprintf(stderr, "Saved %lu floats to %s\n", top_k_probs_history_size, path_char);
 }
+
+// Saves data about the experiment to the file with the given path in JSON format
+static void save_experiment_metadata(double ppl_value, std::string model_name, std::string dataset, std::string path){
+    char * path_char = new char[path.length() + 1];
+    strcpy(path_char, path.c_str());
+
+    FILE * file = fopen(path_char, "w");
+    if(file == NULL){
+        fprintf(stderr, "ERROR: cannot open file %s\n", path_char);
+        exit(1);
+    }
+
+    fprintf(file, "{\n");
+    fprintf(file, "    \"ppl_value\": %f,\n", ppl_value);
+    fprintf(file, "    \"model\": \"%s\",\n", model_name.c_str());
+    fprintf(file, "    \"dataset\": \"%s\"\n", dataset.c_str());
+    fprintf(file, "}\n");
+
+    fclose(file);
+
+    // Print a success message with the path to the file and number of floats
+    fprintf(stderr, "Saved experiment metadata to %s\n", path_char);
+}
+
+static std::string get_experiment_name(){
+    std::string name = "experiment_";
+    name += get_sortable_timestamp();
+    name += ".bin";
+    return name;
+}
+
+
 
 int main(int argc, char ** argv) {
     gpt_params params;
@@ -636,8 +670,10 @@ int main(int argc, char ** argv) {
     struct results_extraction results;
     results = extract_probabilities(ctx, params);
 
-    // Save the probabilities to a file
-    save_probabilities(results.top_k_probs, top_k_probs_path);
+    // Save the results
+    std::string experiment_name = get_experiment_name();
+    save_probabilities(results.top_k_probs, experiment_name + ".bin");
+    save_experiment_metadata(results.ppl_value, params.model, params.prompt_file, experiment_name + ".json");
 
     llama_print_timings(ctx);
     write_logfile(ctx, params, model, results);
