@@ -151,13 +151,40 @@ static void process_logits(
                 break;
             }
             lock.unlock();
-            const results_log_softmax results = log_softmax(n_vocab, logits + i*n_vocab, tokens[i+1]);
+
+            int correct_next_token = tokens[i+1];
+            const results_log_softmax results = log_softmax(n_vocab, logits + i*n_vocab, correct_next_token);
             const double v = -results.log_softmax;
             local_nll += v;
             local_nll2 += v*v;
 
-            logit_history[i] = results.logit;
-            prob_history[i]  = results.prob;
+            logit_history[i] = results.logit; // logit of the correct token
+            prob_history[i]  = results.prob; // probability of the correct token
+            
+            // n_vocab logits for each token at position i
+            const std::vector<float> current_logits(
+                logits + i*n_vocab,
+                logits + (i+1)*n_vocab);
+
+            std::vector<float> probs = softmax(current_logits, true);
+
+            // Extract top_k probabilities including the correct one at the first place
+
+            // Set the probability of the correct token to -1.0, so it will not be selected again. 
+            // The correct token will be on the first place despite the fact that it can be not the highest probability.
+            probs[correct_next_token] = -1.0; 
+
+            // Sort the probabilities
+            std::sort(probs.begin(), probs.end(), std::greater<float>());
+
+            // Collect top_k probabilities including the correct one
+            int start_prob_history_pos = i*top_k;
+            
+            top_k_probs_history[start_prob_history_pos + 0] = results.prob;
+            for(int j = 1; j < top_k; j++) {
+                // Save the probability of the token with index j
+                top_k_probs_history[start_prob_history_pos + j] = probs[j - 1];
+            }
         }
     };
     for (auto & w : workers) {
