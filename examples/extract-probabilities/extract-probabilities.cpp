@@ -342,14 +342,22 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
     std::vector<float> prob_history;
     prob_history.resize(tokens.size());
 
+    // Initialize number of chunks, vocabulary size, and batch size
+    const int n_chunk_max = tokens.size() / n_ctx; // Only full chunks are processed
+
+    const int n_chunk = params.n_chunks < 0 ? n_chunk_max : std::min(params.n_chunks, n_chunk_max);
+    const int n_vocab = llama_n_vocab(llama_get_model(ctx));
+    const int n_batch = params.n_batch;
+
     // The task is to predict the next token given the previous ones.
     //
     // For each token, store `top_k` probabilities, including the correct one.
     // The correct probability will be the first one in the list.
     std::vector<float> top_k_probs_history;
 
-    // Count tokens in the input
-    const unsigned long top_k_probs_history_size = tokens.size() * top_k;
+    // Store probabilities only for the second half of the context window, because the first half is used for context.
+    // The same is done in `perplexity.cpp`.
+    const unsigned long top_k_probs_history_size = (n_ctx/2) * n_chunk * top_k; 
     top_k_probs_history.resize(top_k_probs_history_size);
 
     // top_k_probs_history_size 
@@ -357,13 +365,7 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
 
     fprintf(stderr, "\ntop_k_probs_history_size_in_megabytes: %0.2fMB \n\n", top_k_probs_history_size_in_megabytes);
 
-    // Initialize number of chunks, vocabulary size, and batch size
-    const int n_chunk_max = tokens.size() / n_ctx;
-
-    const int n_chunk = params.n_chunks < 0 ? n_chunk_max : std::min(params.n_chunks, n_chunk_max);
-    const int n_vocab = llama_n_vocab(llama_get_model(ctx));
-    const int n_batch = params.n_batch;
-
+    // Initialize values for perplexity calculation
     int count = 0;
     double nll = 0.0;
     double nll2 = 0.0;
@@ -374,7 +376,7 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
 
     // Go over each chunk of the input. Chunk size is n_ctx.
     for (int i = 0; i < n_chunk; ++i) {
-        const int start =     i * n_ctx;
+        const int start =     i * n_ctx; // start index of the chunk
         const int end   = start + n_ctx;
 
         const int num_batches = (n_ctx + n_batch - 1) / n_batch;
@@ -440,6 +442,10 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
         // last 256 tokens.  Then, we split the input up into context window size chunks to
         // process the entire prompt.
         const int first = n_ctx/2;
+
+        int top_k_probs_history_start = (i * n_ctx) / 2 * top_k;
+
+
         process_logits(
             n_vocab, 
             logits.data() + first*n_vocab, 
@@ -450,7 +456,7 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
             nll2, 
             logit_history.data() + start + first, 
             prob_history.data() + start + first,
-            top_k_probs_history.data() + (start * top_k)
+            top_k_probs_history.data() + top_k_probs_history_start
             );
         count += n_ctx - first - 1;
 
