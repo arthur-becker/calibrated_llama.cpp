@@ -113,6 +113,27 @@ static results_log_softmax log_softmax(int n_vocab, const float * logits, int to
     return {logits[tok] - max_logit - log(sum_exp), logits[tok], expf(logits[tok] - max_logit) / (float) sum_exp};
 }
 
+/*
+        Usage:
+
+        const int first = n_ctx/2;
+        process_logits(
+            n_vocab, 
+            const float * logits =        logits.data() + first*n_vocab =      logits.data() + n_ctx/2*n_vocab, 
+            const int * tokens =       tokens.data() + start + first =      tokens.data() + i * n_ctx + n_ctx/2,
+            int n_token =        n_ctx - 1 - first =       n_ctx - 1 - n_ctx/2,
+            workers, 
+            nll, 
+            nll2, 
+            float * logit_history =          logit_history.data() + start + first, 
+            float * prob_history =          prob_history.data() + start + first,
+            top_k_probs_history =         top_k_probs_history.data() + (start * top_k) = top_k_probs_history.data() + (i * n_ctx) * top_k
+            );
+
+
+
+    logits: pointer to the logits of the first token in the second half of the context window
+*/
 static void process_logits(
     int n_vocab, const float * logits, const int * tokens, int n_token, std::vector<std::thread> & workers,
     double & nll, double & nll2, float * logit_history, float * prob_history, float * top_k_probs_history
@@ -308,12 +329,13 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
     fprintf(stderr, "%s: tokenization took %g ms\n",__func__,1e-3*std::chrono::duration_cast<std::chrono::microseconds>(tim2-tim1).count());
 
     if (int(tokens.size()) < 2*n_ctx) {
-        fprintf(stderr, "%s: you need at least %d tokens to evaluate perplexity with a context of %d\n",__func__,2*n_ctx,
+        fprintf(stderr, "%s: you need at least %d tokens to extract probabilities with a context of %d\n",__func__,2*n_ctx,
                 n_ctx);
         fprintf(stderr, "%s: the data file you provided tokenizes to only %zu tokens\n",__func__,tokens.size());
         return {std::move(tokens), 0., {}, {}};
     }
 
+    // Collect logits and probabilities for each token in the input.
     std::vector<float> logit_history;
     logit_history.resize(tokens.size());
 
@@ -346,10 +368,11 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
     double nll = 0.0;
     double nll2 = 0.0;
 
-    fprintf(stderr, "%s: calculating perplexity over %d chunks, batch_size=%d\n", __func__, n_chunk, n_batch);
+    fprintf(stderr, "%s: extracting probabilities over %d chunks, batch_size=%d\n", __func__, n_chunk, n_batch);
 
     std::vector<std::thread> workers(std::thread::hardware_concurrency() - 1);
 
+    // Go over each chunk of the input. Chunk size is n_ctx.
     for (int i = 0; i < n_chunk; ++i) {
         const int start =     i * n_ctx;
         const int end   = start + n_ctx;
@@ -363,6 +386,8 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
         // clear the KV cache
         llama_kv_cache_clear(ctx);
 
+        // Go over each batch in the chunk. Batch size is n_batch.
+        // Calculate logits for each token in the batch.
         for (int j = 0; j < num_batches; ++j) {
             const int batch_start = start + j * n_batch;
             const int batch_size  = std::min(end - batch_start, n_batch);
@@ -400,6 +425,8 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
             fprintf(stderr, "%.2f minutes\n", total_seconds / 60.0);
         }
 
+        // FROM THE ORIGINAL CODE (perplexity.cpp):
+        //
         // We get the logits for all the tokens in the context window (params.n_ctx)
         // from llama_eval above.  Now, based on https://huggingface.co/docs/transformers/perplexity,
         // calculate the perplexity over the last half of the window (so the model always has
