@@ -11,6 +11,7 @@
 #include <vector>
 
 static int top_k = 100;
+static const char * top_k_probs_path = "top_k_probs.bin";
 
 #if defined(_MSC_VER)
 #pragma warning(disable: 4244 4267) // possible loss of data
@@ -21,6 +22,7 @@ struct results_extraction {
     double                   ppl_value;
     std::vector<float>       logits;
     std::vector<float>       probs;
+    std::vector<float>       top_k_probs;
 };
 
 struct results_log_softmax {
@@ -256,7 +258,7 @@ static results_extraction extract_probabilities_v2(llama_context * ctx, const gp
         fprintf(stderr, "%s: you need at least %d tokens to evaluate perplexity with a context of %d\n",__func__,2*n_ctx,
                 n_ctx);
         fprintf(stderr, "%s: the data file you provided tokenizes to only %zu tokens\n",__func__,tokens.size());
-        return {std::move(tokens), 0., {}, {}};
+        return {std::move(tokens), 0., {}, {}, {}};
     }
 
     std::vector<float> logit_history;
@@ -267,7 +269,7 @@ static results_extraction extract_probabilities_v2(llama_context * ctx, const gp
 
     if (params.ppl_stride <= 0) {
         fprintf(stderr, "%s: stride is %d but must be greater than zero!\n",__func__,params.ppl_stride);
-        return {tokens, -1, logit_history, prob_history};
+        return {tokens, -1, logit_history, prob_history, {}};
     }
 
     const int calc_chunk = n_ctx;
@@ -277,7 +279,7 @@ static results_extraction extract_probabilities_v2(llama_context * ctx, const gp
     if (int(tokens.size()) <= calc_chunk) {
         fprintf(stderr, "%s: there are only %zu tokens, this is not enough for a context size of %d and stride %d\n",__func__,
                 tokens.size(), n_ctx, params.ppl_stride);
-        return {tokens, -1, logit_history, prob_history};
+        return {tokens, -1, logit_history, prob_history, {}};
     }
 
     const int n_chunk_max = (tokens.size() - calc_chunk + params.ppl_stride - 1)  / params.ppl_stride;
@@ -312,7 +314,7 @@ static results_extraction extract_probabilities_v2(llama_context * ctx, const gp
             //fprintf(stderr, "    Batch %d: starts at %d, size is %d, n_past is %d\n",j,batch_start,batch_size,j * n_batch);
             if (llama_decode(ctx, llama_batch_get_one(tokens.data() + batch_start, batch_size, j * n_batch, 0))) {
                 //fprintf(stderr, "%s : failed to eval\n", __func__);
-                return {tokens, -1, logit_history, prob_history};
+                return {tokens, -1, logit_history, prob_history, {}};
             }
 
             // save original token and restore it after eval
@@ -370,7 +372,7 @@ static results_extraction extract_probabilities_v2(llama_context * ctx, const gp
     }
     printf("\n");
 
-    return {tokens, std::exp(nll / count), logit_history, prob_history};
+    return {tokens, std::exp(nll / count), logit_history, prob_history, {}};
 }
 
 static results_extraction extract_probabilities(llama_context * ctx, const gpt_params & params) {
@@ -400,7 +402,7 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
         fprintf(stderr, "%s: you need at least %d tokens to extract probabilities with a context of %d\n",__func__,2*n_ctx,
                 n_ctx);
         fprintf(stderr, "%s: the data file you provided tokenizes to only %zu tokens\n",__func__,tokens.size());
-        return {std::move(tokens), 0., {}, {}};
+        return {std::move(tokens), 0., {}, {}, {}};
     }
 
     // Collect logits and probabilities for each token in the input.
@@ -472,7 +474,8 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
 
             if (llama_decode(ctx, llama_batch_get_one(tokens.data() + batch_start, batch_size, j * n_batch, 0))) {
                 fprintf(stderr, "%s : failed to eval\n", __func__);
-                return {tokens, -1, logit_history, prob_history};
+
+                return {tokens, -1, logit_history, prob_history, top_k_probs_history}; 
             }
 
             // restore the original token in case it was set to BOS
@@ -552,7 +555,28 @@ static results_extraction extract_probabilities(llama_context * ctx, const gpt_p
         printf("Unexpected negative standard deviation of log(prob)\n");
     }
 
-    return {tokens, ppl, logit_history, prob_history};
+    return {tokens, ppl, logit_history, prob_history, top_k_probs_history};
+}
+
+// Saves all values as a list of floats in binary format to the file with the given path
+static void save_probabilities(std::vector<float> top_k_probs_history, const char * path){
+    FILE * file = fopen(path, "wb");
+    if(file == NULL){
+        fprintf(stderr, "ERROR: cannot open file %s\n", path);
+        exit(1);
+    }
+
+    // Write the number of floats
+    unsigned long top_k_probs_history_size = top_k_probs_history.size();
+    fwrite(&top_k_probs_history_size, sizeof(unsigned long), 1, file);
+
+    // Write the floats
+    fwrite(top_k_probs_history.data(), sizeof(float), top_k_probs_history_size, file);
+
+    fclose(file);
+
+    // Print a success message with the path to the file and number of floats
+    fprintf(stderr, "Saved %lu floats to %s\n", top_k_probs_history_size, path);
 }
 
 int main(int argc, char ** argv) {
@@ -611,6 +635,9 @@ int main(int argc, char ** argv) {
 
     struct results_extraction results;
     results = extract_probabilities(ctx, params);
+
+    // Save the probabilities to a file
+    save_probabilities(results.top_k_probs, top_k_probs_path);
 
     llama_print_timings(ctx);
     write_logfile(ctx, params, model, results);
