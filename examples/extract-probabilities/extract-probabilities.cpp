@@ -166,8 +166,31 @@ static void process_logits(
                 logits + i*n_vocab,
                 logits + (i+1)*n_vocab);
 
+            
+            // Test current_logits
+            if(current_logits[correct_next_token] != results.logit) {
+                fprintf(stderr, "\nERROR: current_logits[correct_next_token] != results.logit\n");
+                fprintf(stderr, "current_logits[correct_next_token] = %f\n", current_logits[correct_next_token]);
+                fprintf(stderr, "results.logit = %f\n", results.logit);
+                fprintf(stderr, "correct_next_token = %d\n", correct_next_token);
+                exit(1);
+            }
+
+
             std::vector<float> probs = softmax(current_logits, true);
 
+            // Test probs
+            if(probs[correct_next_token] != results.prob) {
+
+                // print types of proby[correct_next_token] and results.prob
+                
+                fprintf(stderr, "\nERROR: probs[correct_next_token] != results.prob\n");
+                fprintf(stderr, "probs[correct_next_token] = %.15f\n", probs[correct_next_token]);
+                fprintf(stderr, "results.prob = %.15f\n", results.prob);
+                fprintf(stderr, "correct_next_token = %d\n", correct_next_token);
+                exit(1);
+            }
+            
             // Extract top_k probabilities including the correct one at the first place
 
             // Set the probability of the correct token to -1.0, so it will not be selected again. 
@@ -177,11 +200,29 @@ static void process_logits(
             // Sort the probabilities
             std::sort(probs.begin(), probs.end(), std::greater<float>());
 
+            if(n_vocab < top_k+1) {
+                // Without this check, the program can collect impossible probability values (the one of the correct token)
+                fprintf(stderr, "ERROR: n_vocab < top_k\n");
+                exit(1);
+            }
+
             // Collect top_k probabilities including the correct one
             int start_prob_history_pos = i*top_k;
             
             top_k_probs_history[start_prob_history_pos + 0] = results.prob;
             for(int j = 1; j < top_k; j++) {
+                // Test
+                // Every writing to top_k_probs_history should be done only once
+                if(top_k_probs_history[start_prob_history_pos + j] != 0){
+                    fprintf(stderr, "\nERROR: top_k_probs_history[start_prob_history_pos + j] != 0\n");
+                    fprintf(stderr, "top_k_probs_history[start_prob_history_pos + j] = %f\n", top_k_probs_history[start_prob_history_pos + j]);
+                    fprintf(stderr, "probs[j] = %f\n", probs[j - 1]);
+                    fprintf(stderr, "results.prob = %f\n", results.prob);
+                    fprintf(stderr, "start_prob_history_pos = %d\n", start_prob_history_pos);
+                    fprintf(stderr, "j = %d\n", j);
+                    exit(1);
+                }
+
                 // Save the probability of the token with index j
                 top_k_probs_history[start_prob_history_pos + j] = probs[j - 1];
             }
