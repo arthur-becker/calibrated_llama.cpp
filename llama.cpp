@@ -7229,10 +7229,14 @@ static void llama_convert_tensor_internal(
     struct ggml_tensor * tensor, std::vector<no_init<float>> & output, std::vector<std::thread> & workers,
     const size_t nelements, const int nthread
 ) {
+    LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 1");
     if (output.size() < nelements) {
         output.resize(nelements);
     }
     float * f32_output = (float *) output.data();
+
+
+    LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 2");
 
     ggml_type_traits_t qtype;
     if (ggml_is_quantized(tensor->type)) {
@@ -7243,6 +7247,9 @@ static void llama_convert_tensor_internal(
     } else if (tensor->type != GGML_TYPE_F16) {
         throw std::runtime_error(format("cannot dequantize/convert tensor type %s", ggml_type_name(tensor->type)));
     }
+
+
+    LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 3");
 
     if (nthread < 2) {
         if (tensor->type == GGML_TYPE_F16) {
@@ -7255,6 +7262,9 @@ static void llama_convert_tensor_internal(
         return;
     }
 
+
+    LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 4");
+
     auto block_size = tensor->type == GGML_TYPE_F16 ? 1 : (size_t)ggml_blck_size(tensor->type);
     auto block_size_bytes = ggml_type_size(tensor->type);
 
@@ -7262,6 +7272,9 @@ static void llama_convert_tensor_internal(
     auto nblocks = nelements / block_size;
     auto blocks_per_thread = nblocks / nthread;
     auto spare_blocks = nblocks - (blocks_per_thread * nthread); // if blocks aren't divisible by thread count
+
+
+    LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5");
 
     for (auto tnum = 0, in_buff_offs = 0, out_buff_offs = 0; tnum < nthread; tnum++) {
         auto thr_blocks = blocks_per_thread + (tnum == nthread - 1 ? spare_blocks : 0); // num blocks for this thread
@@ -7279,6 +7292,9 @@ static void llama_convert_tensor_internal(
         in_buff_offs += thr_block_bytes;
         out_buff_offs += thr_elems;
     }
+
+    LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 6");
+
     for (auto & w : workers) { w.join(); }
     workers.clear();
 }
