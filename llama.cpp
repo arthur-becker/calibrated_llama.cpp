@@ -7508,17 +7508,28 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
     ::zeros(fout, meta_size);
 
     for (int i = 0; i < ml.n_tensors; ++i) {
+        LLAMA_LOG_INFO("Step1");
         struct ggml_tensor * tensor = ml.get_tensor_meta(i);
-
+        LLAMA_LOG_INFO("Step2");
         const std::string name = ggml_get_name(tensor);
+        LLAMA_LOG_INFO("Step3");
 
         if (!ml.use_mmap) {
+
+            LLAMA_LOG_INFO("Step3.1");
             if (read_data.size() < ggml_nbytes(tensor)) {
+
+                LLAMA_LOG_INFO("Step3.1.1");
                 read_data.resize(ggml_nbytes(tensor));
+                LLAMA_LOG_INFO("Step3.1.2");
             }
+            LLAMA_LOG_INFO("Step3.2");
             tensor->data = read_data.data();
+            LLAMA_LOG_INFO("Step3.3");
         }
         ml.load_data_for(tensor);
+
+        LLAMA_LOG_INFO("Step4");
 
         LLAMA_LOG_INFO("[%4d/%4d] %36s - [%s], type = %6s, ",
                ++idx, ml.n_tensors,
