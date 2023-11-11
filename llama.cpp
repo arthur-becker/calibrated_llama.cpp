@@ -7277,20 +7277,43 @@ static void llama_convert_tensor_internal(
     LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5");
 
     for (auto tnum = 0, in_buff_offs = 0, out_buff_offs = 0; tnum < nthread; tnum++) {
+        LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 1");
         auto thr_blocks = blocks_per_thread + (tnum == nthread - 1 ? spare_blocks : 0); // num blocks for this thread
         auto thr_elems = thr_blocks * block_size; // number of elements for this thread
         auto thr_block_bytes = thr_blocks * block_size_bytes; // number of input bytes for this thread
 
+
+        LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 2");
         auto compute = [qtype] (ggml_type typ, uint8_t * inbuf, float * outbuf, int nels) {
+
+
+                LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 2 -- compute: 0");
             if (typ == GGML_TYPE_F16) {
+
+                LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 2 -- compute: 1");
                 ggml_fp16_to_fp32_row((ggml_fp16_t *)inbuf, outbuf, nels);
+
+
+                LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 2 -- compute: 2");
             } else {
+
+
+                LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 2 -- compute: 3");
                 qtype.to_float(inbuf, outbuf, nels);
+
+
+                LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 2 -- compute: 4");
             }
         };
+
+
+        LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 3");
         workers.emplace_back(compute, tensor->type, (uint8_t *) tensor->data + in_buff_offs, f32_output + out_buff_offs, thr_elems);
+        LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 4");
         in_buff_offs += thr_block_bytes;
+        LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 5");
         out_buff_offs += thr_elems;
+        LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 5 -- threads: 6");
     }
 
     LLAMA_LOG_INFO("\nllama_convert_tensor_internal: 6");
