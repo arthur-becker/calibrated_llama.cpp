@@ -7637,16 +7637,26 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
             }
             LLAMA_LOG_INFO("\n");
         }
+
+        LLAMA_LOG_INFO("\nStep 5\n");
         total_size_org += ggml_nbytes(tensor);
         total_size_new += new_size;
 
+        LLAMA_LOG_INFO("\nStep 6\n");
         // update the gguf meta data as we go
         gguf_set_tensor_type(ctx_out, name.c_str(), new_type);
         gguf_set_tensor_data(ctx_out, name.c_str(), new_data, new_size);
 
+
+        LLAMA_LOG_INFO("\nStep 7\n");
         // write tensor data + padding
         fout.write((const char *) new_data, new_size);
+
+        LLAMA_LOG_INFO("\nStep 8\n");
+
         zeros(fout, GGML_PAD(new_size, align) - new_size);
+
+        LLAMA_LOG_INFO("\nStep 9\n");
     }
 
     // go back to beginning of file and write the updated meta data
