@@ -7537,17 +7537,25 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
                llama_format_tensor_shape(tensor).c_str(),
                ggml_type_name(tensor->type));
 
+        LLAMA_LOG_INFO("\nStep4 - 1\n");
+
         // This used to be a regex, but <regex> has an extreme cost to compile times.
         bool quantize = name.rfind("weight") == name.size() - 6; // ends with 'weight'?
+
+        LLAMA_LOG_INFO("\nStep4 - 2\n");
 
         // quantize only 2D tensors
         quantize &= (tensor->n_dims == 2);
         quantize &= params->quantize_output_tensor || name != "output.weight";
         quantize &= !params->only_copy;
 
+        LLAMA_LOG_INFO("\nStep4 - 3\n");
+
         enum ggml_type new_type;
         void * new_data;
         size_t new_size;
+
+        LLAMA_LOG_INFO("\nStep4 - 4\n");
 
         if (quantize) {
             new_type = quantized_type;
@@ -7565,18 +7573,30 @@ static void llama_model_quantize_internal(const std::string & fname_inp, const s
             new_size = ggml_nbytes(tensor);
             LLAMA_LOG_INFO("size = %8.3f MB\n", ggml_nbytes(tensor)/1024.0/1024.0);
         } else {
+
+                LLAMA_LOG_INFO("\nStep4 - 5\n");
             const size_t nelements = ggml_nelements(tensor);
+
+        LLAMA_LOG_INFO("\nStep4 - 6\n");
 
             float * f32_data;
 
             if (tensor->type == GGML_TYPE_F32) {
+
+        LLAMA_LOG_INFO("\nStep7 - 1\n");
                 f32_data = (float *) tensor->data;
             } else if (ggml_is_quantized(tensor->type) && !params->allow_requantize) {
                 throw std::runtime_error(format("requantizing from type %s is disabled", ggml_type_name(tensor->type)));
             } else {
+
+        LLAMA_LOG_INFO("\nStep4 - 8\n");
                 llama_convert_tensor_internal(tensor, f32_conv_buf, workers, nelements, nthread);
+
+        LLAMA_LOG_INFO("\nStep4 - 9\n");
                 f32_data = (float *) f32_conv_buf.data();
             }
+
+        LLAMA_LOG_INFO("\nStep4 - 10\n");
 
             LLAMA_LOG_INFO("quantizing to %s .. ", ggml_type_name(new_type));
             fflush(stdout);
