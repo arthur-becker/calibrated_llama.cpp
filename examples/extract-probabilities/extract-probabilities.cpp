@@ -607,7 +607,6 @@ static void save_experiment_metadata(double ppl_value, std::string model_name, s
 static std::string get_experiment_name(){
     std::string name = "experiment_";
     name += get_sortable_timestamp();
-    name += ".bin";
     return name;
 }
 
