@@ -582,7 +582,7 @@ static void save_probabilities(std::vector<float> top_k_probs_history, std::stri
 }
 
 // Saves data about the experiment to the file with the given path in JSON format
-static void save_experiment_metadata(double ppl_value, std::string model_name, std::string dataset, std::string path){
+static void save_experiment_metadata(double ppl_value, std::string model_name, std::string dataset, int top_k, std::string path){
     char * path_char = new char[path.length() + 1];
     strcpy(path_char, path.c_str());
 
@@ -595,7 +595,8 @@ static void save_experiment_metadata(double ppl_value, std::string model_name, s
     fprintf(file, "{\n");
     fprintf(file, "    \"ppl_value\": %f,\n", ppl_value);
     fprintf(file, "    \"model\": \"%s\",\n", model_name.c_str());
-    fprintf(file, "    \"dataset\": \"%s\"\n", dataset.c_str());
+    fprintf(file, "    \"dataset\": \"%s\",\n", dataset.c_str());
+    fprintf(file, "    \"top_k\": \"%i\",\n", top_k);
     fprintf(file, "}\n");
 
     fclose(file);
@@ -672,7 +673,7 @@ int main(int argc, char ** argv) {
     // Save the results
     std::string experiment_name = get_experiment_name();
     save_probabilities(results.top_k_probs, experiment_name + ".bin");
-    save_experiment_metadata(results.ppl_value, params.model, params.prompt_file, experiment_name + ".json");
+    save_experiment_metadata(results.ppl_value, params.model, params.prompt_file, top_k, experiment_name + ".json");
 
     llama_print_timings(ctx);
     write_logfile(ctx, params, model, results);
