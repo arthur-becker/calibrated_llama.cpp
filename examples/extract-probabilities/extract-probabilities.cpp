@@ -201,7 +201,7 @@ static void process_logits(
             // Sort the probabilities
             std::sort(probs.begin(), probs.end(), std::greater<float>());
 
-            if(n_vocab < top_k+1) {
+            if(n_vocab < top_k) {
                 // Without this check, the program can collect impossible probability values (the one of the correct token)
                 fprintf(stderr, "ERROR: n_vocab < top_k\n");
                 exit(1);
