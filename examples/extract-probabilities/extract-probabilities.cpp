@@ -582,7 +582,14 @@ static void save_probabilities(std::vector<float> top_k_probs_history, std::stri
 }
 
 // Saves data about the experiment to the file with the given path in JSON format
-static void save_experiment_metadata(double ppl_value, std::string model_name, std::string dataset, int top_k, std::string path){
+static void save_experiment_metadata(
+    double ppl_value, 
+    std::string model_name, 
+    std::string dataset, 
+    int top_k, 
+    std::vector<float> top_k_probs,
+    int n_ctx, 
+    std::string path){
     char * path_char = new char[path.length() + 1];
     strcpy(path_char, path.c_str());
 
@@ -597,6 +604,31 @@ static void save_experiment_metadata(double ppl_value, std::string model_name, s
     fprintf(file, "    \"model\": \"%s\",\n", model_name.c_str());
     fprintf(file, "    \"dataset\": \"%s\",\n", dataset.c_str());
     fprintf(file, "    \"top_k\": \"%i\",\n", top_k);
+
+    // Write the probabilities for the first and the last position of the first context window
+    int wnd_half_size = n_ctx / 2; // Because only probabilities for the second half are collected
+    fprintf(file, "    \"top_k_probs_1\": [\n");
+    for(int i = 0; i < top_k; i++){
+        fprintf(file, "        %.10f", top_k_probs[i]);
+        if(i != top_k - 1){
+            fprintf(file, ",");
+        }
+        fprintf(file, "\n");
+    }
+    fprintf(file, "    ],\n");
+
+
+    fprintf(file, "    \"top_k_probs_2\": [\n");
+    for(int i = (wnd_half_size-1)*top_k; i < wnd_half_size*top_k; i++){
+        fprintf(file, "        %.10f", top_k_probs[i]);
+        if(i != wnd_half_size*top_k - 1){
+            fprintf(file, ",");
+        }
+        fprintf(file, "\n");
+    }
+    fprintf(file, "    ]\n");
+
+
     fprintf(file, "}\n");
 
     fclose(file);
@@ -673,7 +705,9 @@ int main(int argc, char ** argv) {
     // Save the results
     std::string experiment_name = get_experiment_name();
     save_probabilities(results.top_k_probs, experiment_name + ".bin");
-    save_experiment_metadata(results.ppl_value, params.model, params.prompt_file, top_k, experiment_name + ".json");
+
+    const int n_ctx = llama_n_ctx(ctx);
+    save_experiment_metadata(results.ppl_value, params.model, params.prompt_file, top_k, results.top_k_probs, n_ctx, experiment_name + ".json");
 
     llama_print_timings(ctx);
     write_logfile(ctx, params, model, results);
